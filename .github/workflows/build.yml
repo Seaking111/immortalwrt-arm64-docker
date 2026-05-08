@@ -2,8 +2,6 @@ name: Build ImmortalWrt ARM64 Docker
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 2 * * *'
 
 jobs:
   build:
@@ -16,35 +14,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 获取官方最新版本号（100%稳定）
-        id: iw_ver
+      # 固定官方版本（保证永远不报错、永远有版本号）
+      - name: 设置官方版本号
         run: |
-          VER=$(curl -s https://api.github.com/repos/immortalwrt/immortalwrt/releases/latest | jq -r '.tag_name' | sed 's/^v//')
-          echo "VERSION=$VER" >> $GITHUB_OUTPUT
+          echo "IW_VERSION=24.10.5" >> $GITHUB_ENV
 
-      - name: 检查版本是否已构建
-        id: check_tag
-        run: |
-          TAG="${{ steps.iw_ver.outputs.VERSION }}"
-          if docker manifest inspect ghcr.io/seaking111/immortalwrt-arm64:$TAG >/dev/null 2>&1; then
-            echo "EXIST=true" >> $GITHUB_OUTPUT
-          else
-            echo "EXIST=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: 版本已存在，跳过构建
-        if: steps.check_tag.outputs.EXIST == 'true'
-        run: |
-          echo "✅ 版本已存在，跳过构建"
-          exit 0
-
+      # 下载固件
       - name: 下载官方 rootfs
         run: |
-          wget -O rootfs.tar.gz https://immortalwrt.org/releases/${{ steps.iw_ver.outputs.VERSION }}/targets/armvirt/64/rootfs.tar.gz
+          wget -O rootfs.tar.gz https://immortalwrt.org/releases/${IW_VERSION}/targets/armvirt/64/rootfs.tar.gz
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
+      # 登录GHCR
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -52,7 +32,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 构建并推送镜像
+      # 构建并推送（两个标签：latest + 官方版本号）
+      - name: 构建并推送
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -60,4 +41,4 @@ jobs:
           platforms: linux/arm64
           tags: |
             ghcr.io/seaking111/immortalwrt-arm64:latest
-            ghcr.io/seaking111/immortalwrt-arm64:${{ steps.iw_ver.outputs.VERSION }}
+            ghcr.io/seaking111/immortalwrt-arm64:${{ env.IW_VERSION }}
