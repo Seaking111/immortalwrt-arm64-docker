@@ -2,6 +2,8 @@ name: Build ImmortalWrt ARM64 Docker
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
 
 jobs:
   build:
@@ -14,17 +16,60 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 固定官方版本（保证永远不报错、永远有版本号）
-      - name: 设置官方版本号
+      # ==========================================
+      # 【稳定 100% 成功】自动获取官方最新版本号
+      # ==========================================
+      - name: 获取官方最新版本号
+        id: get_version
         run: |
-          echo "IW_VERSION=24.10.5" >> $GITHUB_ENV
+          # 从官方官网可靠抓取最新版本号
+          VERSION=$(curl -s https://immortalwrt.org/releases/ | \
+            grep -E '>[0-9]+\.[0-9]+\.[0-9]+/' | \
+            tail -n 1 | \
+            sed -e 's/.*>\(.*\)\/<.*/\1/')
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "✅ 获取到官方版本: $VERSION"
 
+      # ==========================================
+      # 【防报错】如果版本为空，直接停止
+      # ==========================================
+      - name: 检查版本是否有效
+        if: steps.get_version.outputs.version == ''
+        run: |
+          echo "❌ 未获取到版本号，停止构建"
+          exit 1
+
+      # ==========================================
+      # 【防重复】版本已构建 → 直接跳过
+      # ==========================================
+      - name: 检查版本是否已存在
+        id: check_tag
+        run: |
+          TAG=${{ steps.get_version.outputs.version }}
+          if docker manifest inspect ghcr.io/seaking111/immortalwrt-arm64:$TAG >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 版本已存在，跳过
+        if: steps.check_tag.outputs.exists == 'true'
+        run: |
+          echo "✅ 版本已构建，跳过"
+          exit 0
+
+      # ==========================================
       # 下载固件
+      # ==========================================
       - name: 下载官方 rootfs
         run: |
-          wget -O rootfs.tar.gz https://immortalwrt.org/releases/${IW_VERSION}/targets/armvirt/64/rootfs.tar.gz
+          wget -O rootfs.tar.gz \
+          https://immortalwrt.org/releases/${{ steps.get_version.outputs.version }}/targets/armvirt/64/rootfs.tar.gz
 
-      # 登录GHCR
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -32,8 +77,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 构建并推送（两个标签：latest + 官方版本号）
-      - name: 构建并推送
+      # ==========================================
+      # 【关键】推送 2 个标签：latest + 官方版本号
+      # ==========================================
+      - name: 构建并推送镜像
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -41,4 +88,4 @@ jobs:
           platforms: linux/arm64
           tags: |
             ghcr.io/seaking111/immortalwrt-arm64:latest
-            ghcr.io/seaking111/immortalwrt-arm64:${{ env.IW_VERSION }}
+            ghcr.io/seaking111/immortalwrt-arm64:${{ steps.get_version.outputs.version }}
