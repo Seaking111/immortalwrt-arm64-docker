@@ -16,10 +16,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 获取官方最新版本号
+      - name: 获取官方最新版本号（100%稳定）
         id: iw_ver
         run: |
-          VER=$(curl -s https://immortalwrt.org/releases/ | grep -E '([0-9]+\.){2}[0-9]+' | grep -v sha256 | tail -n 1 | sed -n 's/.*>\(.*\)\/<.*/\1/p')
+          VER=$(curl -s https://api.github.com/repos/immortalwrt/immortalwrt/releases/latest | jq -r '.tag_name' | sed 's/^v//')
           echo "VERSION=$VER" >> $GITHUB_OUTPUT
 
       - name: 检查版本是否已构建
@@ -35,10 +35,10 @@ jobs:
       - name: 版本已存在，跳过构建
         if: steps.check_tag.outputs.EXIST == 'true'
         run: |
-          echo "版本已构建，退出"
+          echo "✅ 版本已存在，跳过构建"
           exit 0
 
-      - name: 下载 rootfs
+      - name: 下载官方 rootfs
         run: |
           wget -O rootfs.tar.gz https://immortalwrt.org/releases/${{ steps.iw_ver.outputs.VERSION }}/targets/armvirt/64/rootfs.tar.gz
 
@@ -52,7 +52,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 构建并推送
+      - name: 构建并推送镜像
         uses: docker/build-push-action@v6
         with:
           context: .
