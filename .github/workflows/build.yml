@@ -11,29 +11,53 @@ jobs:
     permissions:
       packages: write
       contents: read
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 下载官方 ARM64 rootfs
+      - name: 获取官方最新版本号
+        id: iw_ver
         run: |
-          wget -O rootfs.tar.gz https://immortalwrt.org/releases/24.10.5/targets/armvirt/64/rootfs.tar.gz
+          VER=$(curl -s https://immortalwrt.org/releases/ | grep -E '([0-9]+\.){2}[0-9]+' | grep -v sha256 | tail -n 1 | sed -n 's/.*>\(.*\)\/<.*/\1/p')
+          echo "VERSION=$VER" >> $GITHUB_OUTPUT
 
-      - name: 设置 Docker Buildx
+      - name: 检查版本是否已构建
+        id: check_tag
+        run: |
+          TAG="${{ steps.iw_ver.outputs.VERSION }}"
+          if docker manifest inspect ghcr.io/seaking111/immortalwrt-arm64:$TAG >/dev/null 2>&1; then
+            echo "EXIST=true" >> $GITHUB_OUTPUT
+          else
+            echo "EXIST=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 版本已存在，跳过构建
+        if: steps.check_tag.outputs.EXIST == 'true'
+        run: |
+          echo "版本已构建，退出"
+          exit 0
+
+      - name: 下载 rootfs
+        run: |
+          wget -O rootfs.tar.gz https://immortalwrt.org/releases/${{ steps.iw_ver.outputs.VERSION }}/targets/armvirt/64/rootfs.tar.gz
+
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 登录 GHCR
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 构建并推送镜像
+      - name: 构建并推送
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ghcr.io/seaking111/immortalwrt-arm64:latest
           platforms: linux/arm64
-          outputs: type=docker,dest=/tmp/image.tar
+          tags: |
+            ghcr.io/seaking111/immortalwrt-arm64:latest
+            ghcr.io/seaking111/immortalwrt-arm64:${{ steps.iw_ver.outputs.VERSION }}
